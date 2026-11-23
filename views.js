@@ -114,6 +114,7 @@
       ${state.vehicles.length ? '' : '<div class="card empty">Aucun véhicule.</div>'}
       <h2 class="sec">Réglages</h2><div class="card"><form id="settings"><div class="f"><label class="inl"><input type="checkbox" name="pro" ${state.settings.pro ? 'checked' : ''}> Mode pro : afficher les coûts hors taxes</label></div>
       <div class="f"><label for="th">Thème</label><select id="th" name="theme"><option value="auto" ${state.settings.theme === 'auto' ? 'selected' : ''}>Automatique</option><option value="dark" ${state.settings.theme === 'dark' ? 'selected' : ''}>Sombre</option><option value="light" ${state.settings.theme === 'light' ? 'selected' : ''}>Clair</option></select></div></form></div>
+      <h2 class="sec">Diagnostic</h2><div class="card"><p class="muted" style="margin-top:0">Version ${esc(O().VERSION)}. Si une photo ou une facture pose problème, lance le diagnostic et envoie-moi une capture du résultat.</p><button class="btn ghost" data-act="diag">Lancer le diagnostic</button><pre id="diagout"></pre></div>
       <h2 class="sec">Sauvegarde</h2><div class="card"><p class="muted" style="margin-top:0">Tes données vivent dans ce navigateur. Exporte une sauvegarde de temps en temps, surtout avant de changer d'appareil ou de vider le navigateur.</p>
       <div class="row"><button class="btn" data-act="export">Exporter une sauvegarde</button><label class="btn ghost" style="cursor:pointer">Importer<input type="file" id="imp" accept=".json" hidden></label>${O().DEMO ? '' : '<button class="btn danger" data-act="reset">Tout effacer</button>'}</div></div>
       ${state.license.key ? '<h2 class="sec">Abonnement</h2><div class="card muted">Clé enregistrée sur cet appareil. Gère ton abonnement depuis le reçu Gumroad.</div>' : ''}`;
@@ -126,7 +127,7 @@
   /** Après chaque rendu : photos, compteur animé. */
   async function after() {
     const o = O();
-    document.querySelectorAll('[data-photo]').forEach(async (el) => { const id = el.dataset.photo; const b = await o.getFile(id); if (b) { el.style.backgroundImage = `url(${URL.createObjectURL(b)})`; return; } const veh = o.state.vehicles.find((x) => x.photo === id); el.outerHTML = `<div class="carwrap${el.classList.contains('sm') ? ' sm' : ''}">${A.car((veh && veh.body) || 'citadine')}</div>`; });
+    document.querySelectorAll('[data-photo]').forEach(async (el) => { const id = el.dataset.photo; const b = await o.getFile(id); let url = null; if (b) { url = URL.createObjectURL(b); const ok = await new Promise((res) => { const im = new Image(); im.onload = () => res(im.naturalWidth > 0); im.onerror = () => res(false); im.src = url; }); if (!ok) { URL.revokeObjectURL(url); url = null; } } if (url) { el.style.backgroundImage = `url(${url})`; return; } const veh = o.state.vehicles.find((x) => x.photo === id); el.outerHTML = `<div class="carwrap${el.classList.contains('sm') ? ' sm' : ''}">${A.car((veh && veh.body) || 'citadine')}</div><p class="muted" style="text-align:center;font-size:12px">Photo illisible sur cet appareil : ajoute-la de nouveau (Véhicules, Modifier).</p>`; });
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     document.querySelectorAll('.odo[data-km]').forEach((el) => {
       if (reduce) return; const km = +el.dataset.km; const digits = el.querySelectorAll('.dg'); const t0 = performance.now(); const dur = 900;

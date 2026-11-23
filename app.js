@@ -5,6 +5,7 @@
   const params = new URLSearchParams(location.search);
   const DEMO = params.has('demo');
   const GRACE_DAYS = 14;
+  const VERSION = 'v4';
 
   const state = { vehicles: [], interventions: [], settings: { pro: false, theme: 'auto', notify: false, lastNotif: '' }, license: { key: '', lastOk: 0 }, currentVehicle: null };
   let view = ['dash', 'log', 'due', 'cost', 'car'].includes(params.get('view')) ? params.get('view') : 'dash';
@@ -78,13 +79,39 @@
   async function putFile(file, maxSide, q) {
     try { const rec = await toStorable(file, maxSide, q); const id = uid(); const ok = await DB.put('files', id, rec); return ok ? { id, name: rec.name, type: rec.type } : null; } catch (e) { return null; }
   }
-  async function getFile(id) { const r = await DB.get('files', id); if (!r) return null; return r instanceof Blob ? r : new Blob([r.buf], { type: r.type }); }
+  async function getFile(id) {
+    const r = await DB.get('files', id); if (!r) return null;
+    try { const b = r instanceof Blob ? r : new Blob([r.buf], { type: r.type }); if (!b.size) return null; if (r instanceof Blob) await b.slice(0, 1).arrayBuffer(); return b; } catch (e) { return null; }
+  }
   async function viewFile(id, name) {
     const b = await getFile(id);
-    if (!b || !FILE_TYPES.includes(b.type)) { alert('Fichier introuvable sur cet appareil.'); return; }
+    if (!b || !FILE_TYPES.includes(b.type)) { alert("Ce fichier est illisible sur cet appareil (enregistré avec une ancienne version du carnet). Ajoute-le de nouveau."); return; }
     const url = URL.createObjectURL(b); const pdf = b.type === 'application/pdf'; const v = $('#viewer');
     v.innerHTML = `<div class="vbar"><b>${esc(name)}</b><span class="row"><a class="btn small ghost" href="${url}" download="${esc(name)}">Télécharger</a><button class="btn small" type="button" data-vclose>Fermer</button></span></div>${pdf ? `<iframe src="${url}" title="${esc(name)}"></iframe>` : `<img src="${url}" alt="${esc(name)}">`}`;
     v.querySelector('[data-vclose]').onclick = () => v.close(); v.onclose = () => URL.revokeObjectURL(url); v.showModal();
+  }
+
+
+  /* ---------- Erreurs et diagnostic (utile sur téléphone, sans console) ---------- */
+  const ERRORS = [];
+  const noteErr = (m) => { ERRORS.push(cs(m, 120)); if (ERRORS.length > 5) ERRORS.shift(); };
+  window.addEventListener('error', (e) => noteErr(e.message));
+  window.addEventListener('unhandledrejection', (e) => noteErr(e.reason && e.reason.message ? e.reason.message : e.reason));
+  async function runDiag() {
+    const out = $('#diagout'); const L = []; const add = (k, v) => { L.push(k + ' : ' + v); out.textContent = L.join('\n'); };
+    add('Version', VERSION); add('Navigateur', navigator.userAgent.slice(0, 110));
+    add('Fenêtres (dialog)', typeof HTMLDialogElement); add('createImageBitmap', typeof createImageBitmap); add('Service worker', 'serviceWorker' in navigator);
+    try { const est = await navigator.storage.estimate(); add('Stockage', Math.round(est.usage / 1e6) + ' Mo utilisés sur ' + Math.round(est.quota / 1e6) + ' Mo'); } catch (e) { add('Stockage', 'inconnu'); }
+    add('Base de données', DB.db ? 'ouverte' : 'INDISPONIBLE');
+    try { const ok = await DB.put('files', '__diag', { name: 't', type: 'application/pdf', buf: new Uint8Array([1, 2, 3, 4]).buffer }); const r = await DB.get('files', '__diag'); add('Écriture et relecture', ok && r && r.buf && r.buf.byteLength === 4 ? 'OK' : 'ÉCHEC'); await DB.del('files', '__diag'); } catch (e) { add('Écriture et relecture', 'ÉCHEC ' + e.message); }
+    try {
+      const cv = document.createElement('canvas'); cv.width = 60; cv.height = 60; cv.getContext('2d').fillRect(0, 0, 60, 60);
+      const b = await new Promise((r) => cv.toBlob(r, 'image/jpeg', 0.8)); add('Création JPEG', b ? b.size + ' octets' : 'ÉCHEC');
+      const f = new File([b], 'x.jpg', { type: 'image/jpeg' });
+      try { await createImageBitmap(f, { imageOrientation: 'from-image' }); add('Décodage image', 'OK'); } catch (e) { try { await createImageBitmap(f); add('Décodage image', 'OK (sans orientation)'); } catch (e2) { add('Décodage image', 'ÉCHEC ' + e2.message); } }
+    } catch (e) { add('Image', 'ÉCHEC ' + e.message); }
+    try { const all = await DB.all('files'); let old = 0, bad = 0, fresh = 0; for (const [id, r] of all) { if (r instanceof Blob) { old++; if (!(await getFile(id))) bad++; } else fresh++; } add('Fichiers enregistrés', fresh + ' récents, ' + old + ' anciens dont ' + bad + ' illisibles'); } catch (e) { add('Fichiers enregistrés', 'ÉCHEC ' + e.message); }
+    add('Erreurs récentes', ERRORS.length ? ERRORS.join(' | ') : 'aucune');
   }
 
   /* ---------- Utilitaires ---------- */
@@ -285,6 +312,7 @@
     else if (a === 'reset') { if (confirm('Effacer tout le carnet de cet appareil ?') && confirm('Dernière confirmation : cette action est définitive.')) { state.vehicles = []; state.interventions = []; for (const [id] of await DB.all('files')) await DB.del('files', id); state.currentVehicle = null; await save(); render(); } }
     else if (a === 'demoData') { seedDemo(); await save(); render(); }
     else if (a === 'openFile') { e.preventDefault(); viewFile(el.dataset.f, el.textContent.trim() || 'fichier'); }
+    else if (a === 'diag') runDiag();
   });
   document.addEventListener('change', async (e) => {
     const el = e.target;
@@ -321,9 +349,9 @@
     try { await Promise.race([DB.open(), new Promise((_, rej) => setTimeout(() => rej(new Error('idb')), 3000))]); } catch (e) { DB.db = null; state.noStorage = true; }
     const s = await DB.get('kv', 'state');
     if (s) Object.assign(state, s);
-    if (!DEMO && 'serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
+    if (!DEMO && 'serviceWorker' in navigator && location.protocol.startsWith('http')) { const had = !!navigator.serviceWorker.controller; navigator.serviceWorker.addEventListener('controllerchange', () => { try { if (had && !sessionStorage.getItem('odo-rl')) { sessionStorage.setItem('odo-rl', '1'); location.reload(); } } catch (e) { /* ignore */ } }); navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(() => {}); }
     boot2();
   }
-  window.Odo = { state, E, DEMO, esc, eur, num, dFr, monthFr, monthShort, typeLabel, vInts, humanDue, picker, PILL, vehicle, getFile };
+  window.Odo = { state, E, DEMO, esc, eur, num, dFr, monthFr, monthShort, typeLabel, vInts, humanDue, picker, PILL, vehicle, getFile, VERSION };
   boot();
 })();
