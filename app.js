@@ -5,7 +5,7 @@
   const params = new URLSearchParams(location.search);
   const DEMO = params.has('demo');
   const GRACE_DAYS = 14;
-  const VERSION = 'v5';
+  const VERSION = 'v6';
 
   const state = { vehicles: [], interventions: [], settings: { pro: false, theme: 'auto', notify: false, lastNotif: '' }, license: { key: '', lastOk: 0 }, currentVehicle: null };
   let view = ['dash', 'log', 'due', 'cost', 'car'].includes(params.get('view')) ? params.get('view') : 'dash';
@@ -176,7 +176,7 @@
     $('#root').innerHTML = `<div class="app"><aside class="side"><div class="brand">${DIAL}<span>${esc(CFG.name || 'Odomètre')}</span></div>
       <nav class="nav">${nav.map(([k, l]) => `<button data-act="nav" data-v="${k}" ${view === k ? 'aria-current="page"' : ''}>${window.Art.icon(k)}<span>${l}</span></button>`).join('')}</nav>
       <div class="foot">${DEMO ? 'Mode démo : rien n\'est enregistré.' : 'Données sur cet appareil.'}</div></aside>
-      <main>${state.noStorage && !DEMO ? '<div class="banner">Ton navigateur bloque le stockage (navigation privée ?). Tes données ne seront pas conservées : exporte une sauvegarde avant de quitter.</div>' : ''}${DEMO ? '<div class="banner">Démo avec des données d\'exemple. Rien n\'est enregistré.</div>' : ''}${!v && view !== 'car' ? V.start() : ({ dash: V.dash, log: V.log, due: V.due, cost: V.cost, car: V.cars }[view])(v)}</main></div>`;
+      <main>${state.noStorage && !DEMO ? '<div class="banner">Ton navigateur bloque le stockage (navigation privée ?). Tes données ne seront pas conservées : exporte une sauvegarde avant de quitter.</div>' : ''}${DEMO && !params.has('clean') ? '<div class="banner">Démo avec des données d\'exemple. Rien n\'est enregistré.</div>' : ''}${!v && view !== 'car' ? V.start() : ({ dash: V.dash, log: V.log, due: V.due, cost: V.cost, car: V.cars }[view])(v)}</main></div>`;
     V.after();
   }
   const picker = (v) => state.vehicles.length > 1 ? `<select data-act="pickCar" aria-label="Véhicule">${state.vehicles.map((x) => `<option value="${esc(x.id)}" ${x.id === v.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>` : '';
