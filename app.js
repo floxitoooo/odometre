@@ -5,20 +5,21 @@
   const params = new URLSearchParams(location.search);
   const DEMO = params.has('demo');
   const GRACE_DAYS = 14;
-  const VERSION = 'v4';
+  const VERSION = 'v5';
 
   const state = { vehicles: [], interventions: [], settings: { pro: false, theme: 'auto', notify: false, lastNotif: '' }, license: { key: '', lastOk: 0 }, currentVehicle: null };
   let view = ['dash', 'log', 'due', 'cost', 'car'].includes(params.get('view')) ? params.get('view') : 'dash';
 
   /* ---------- Stockage ---------- */
+  const MEM = { kv: {}, files: {} };
   const DB = { db: null,
     open() { return new Promise((res, rej) => { if (DEMO) return res(); const r = indexedDB.open('odometre', 1);
       r.onupgradeneeded = () => { r.result.createObjectStore('kv'); r.result.createObjectStore('files'); };
       r.onsuccess = () => { DB.db = r.result; res(); }; r.onerror = () => rej(r.error); }); },
-    get(store, key) { return new Promise((res) => { if (!DB.db) return res(null); const q = DB.db.transaction(store).objectStore(store).get(key); q.onsuccess = () => res(q.result || null); q.onerror = () => res(null); }); },
-    put(store, key, val) { return new Promise((res) => { if (!DB.db) return res(false); try { const t = DB.db.transaction(store, 'readwrite'); t.objectStore(store).put(val, key); t.oncomplete = () => res(true); t.onerror = () => res(false); t.onabort = () => res(false); } catch (e) { res(false); } }); },
-    del(store, key) { return new Promise((res) => { if (!DB.db) return res(); const t = DB.db.transaction(store, 'readwrite'); t.objectStore(store).delete(key); t.oncomplete = () => res(); }); },
-    all(store) { return new Promise((res) => { if (!DB.db) return res([]); const out = []; const c = DB.db.transaction(store).objectStore(store).openCursor();
+    get(store, key) { return new Promise((res) => { if (DEMO) return res(MEM[store][key] || null); if (!DB.db) return res(null); const q = DB.db.transaction(store).objectStore(store).get(key); q.onsuccess = () => res(q.result || null); q.onerror = () => res(null); }); },
+    put(store, key, val) { return new Promise((res) => { if (DEMO) { MEM[store][key] = val; return res(true); } if (!DB.db) return res(false); try { const t = DB.db.transaction(store, 'readwrite'); t.objectStore(store).put(val, key); t.oncomplete = () => res(true); t.onerror = () => res(false); t.onabort = () => res(false); } catch (e) { res(false); } }); },
+    del(store, key) { return new Promise((res) => { if (DEMO) { delete MEM[store][key]; return res(); } if (!DB.db) return res(); const t = DB.db.transaction(store, 'readwrite'); t.objectStore(store).delete(key); t.oncomplete = () => res(); }); },
+    all(store) { return new Promise((res) => { if (DEMO) return res(Object.entries(MEM[store])); if (!DB.db) return res([]); const out = []; const c = DB.db.transaction(store).objectStore(store).openCursor();
       c.onsuccess = () => { const cur = c.result; if (cur) { out.push([cur.key, cur.value]); cur.continue(); } else res(out); }; c.onerror = () => res(out); }); }
   };
   const save = () => DB.put('kv', 'state', { vehicles: state.vehicles, interventions: state.interventions, settings: state.settings, license: state.license, currentVehicle: state.currentVehicle });
@@ -102,7 +103,7 @@
     add('Version', VERSION); add('Navigateur', navigator.userAgent.slice(0, 110));
     add('Fenêtres (dialog)', typeof HTMLDialogElement); add('createImageBitmap', typeof createImageBitmap); add('Service worker', 'serviceWorker' in navigator);
     try { const est = await navigator.storage.estimate(); add('Stockage', Math.round(est.usage / 1e6) + ' Mo utilisés sur ' + Math.round(est.quota / 1e6) + ' Mo'); } catch (e) { add('Stockage', 'inconnu'); }
-    add('Base de données', DB.db ? 'ouverte' : 'INDISPONIBLE');
+    add('Base de données', DEMO ? 'mémoire (mode démo, rien n\'est conservé)' : DB.db ? 'ouverte' : 'INDISPONIBLE');
     try { const ok = await DB.put('files', '__diag', { name: 't', type: 'application/pdf', buf: new Uint8Array([1, 2, 3, 4]).buffer }); const r = await DB.get('files', '__diag'); add('Écriture et relecture', ok && r && r.buf && r.buf.byteLength === 4 ? 'OK' : 'ÉCHEC'); await DB.del('files', '__diag'); } catch (e) { add('Écriture et relecture', 'ÉCHEC ' + e.message); }
     try {
       const cv = document.createElement('canvas'); cv.width = 60; cv.height = 60; cv.getContext('2d').fillRect(0, 0, 60, 60);

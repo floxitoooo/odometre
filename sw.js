@@ -1,4 +1,4 @@
-const V = 'odometre-v4';
+const V = 'odometre-v5';
 const CORE = ['./', 'index.html', 'style.css', 'engine.js', 'art.js', 'views.js', 'app.js', 'config.js', 'icon.svg', 'manifest.webmanifest', 'SpaceGrotesk.woff2', 'JetBrainsMono.woff2'];
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(V).then((c) => c.addAll(CORE))); self.skipWaiting(); });
 self.addEventListener('activate', (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== V).map((k) => caches.delete(k))))); self.clients.claim(); });
