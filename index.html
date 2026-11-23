@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Odomètre : carnet d'entretien auto</title>
 <meta name="theme-color" content="#0E1013">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' data: https://api.gumroad.com; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' data: https://api.gumroad.com; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'; frame-src blob:; object-src blob:">
 <meta name="referrer" content="no-referrer">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
@@ -14,6 +14,7 @@
 <body>
 <div id="root"></div>
 <dialog id="dlg"></dialog>
+<dialog id="viewer"></dialog>
 <script src="config.js"></script>
 <script src="engine.js"></script>
 <script src="art.js"></script>

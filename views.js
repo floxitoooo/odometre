@@ -126,7 +126,7 @@
   /** Après chaque rendu : photos, compteur animé. */
   async function after() {
     const o = O();
-    document.querySelectorAll('[data-photo]').forEach(async (el) => { const b = await o.getFile(el.dataset.photo); if (b) el.style.backgroundImage = `url(${URL.createObjectURL(b)})`; });
+    document.querySelectorAll('[data-photo]').forEach(async (el) => { const id = el.dataset.photo; const b = await o.getFile(id); if (b) { el.style.backgroundImage = `url(${URL.createObjectURL(b)})`; return; } const veh = o.state.vehicles.find((x) => x.photo === id); el.outerHTML = `<div class="carwrap${el.classList.contains('sm') ? ' sm' : ''}">${A.car((veh && veh.body) || 'citadine')}</div>`; });
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     document.querySelectorAll('.odo[data-km]').forEach((el) => {
       if (reduce) return; const km = +el.dataset.km; const digits = el.querySelectorAll('.dg'); const t0 = performance.now(); const dur = 900;

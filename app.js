@@ -15,7 +15,7 @@
       r.onupgradeneeded = () => { r.result.createObjectStore('kv'); r.result.createObjectStore('files'); };
       r.onsuccess = () => { DB.db = r.result; res(); }; r.onerror = () => rej(r.error); }); },
     get(store, key) { return new Promise((res) => { if (!DB.db) return res(null); const q = DB.db.transaction(store).objectStore(store).get(key); q.onsuccess = () => res(q.result || null); q.onerror = () => res(null); }); },
-    put(store, key, val) { return new Promise((res) => { if (!DB.db) return res(); const t = DB.db.transaction(store, 'readwrite'); t.objectStore(store).put(val, key); t.oncomplete = () => res(); t.onerror = () => res(); }); },
+    put(store, key, val) { return new Promise((res) => { if (!DB.db) return res(false); try { const t = DB.db.transaction(store, 'readwrite'); t.objectStore(store).put(val, key); t.oncomplete = () => res(true); t.onerror = () => res(false); t.onabort = () => res(false); } catch (e) { res(false); } }); },
     del(store, key) { return new Promise((res) => { if (!DB.db) return res(); const t = DB.db.transaction(store, 'readwrite'); t.objectStore(store).delete(key); t.oncomplete = () => res(); }); },
     all(store) { return new Promise((res) => { if (!DB.db) return res([]); const out = []; const c = DB.db.transaction(store).objectStore(store).openCursor();
       c.onsuccess = () => { const cur = c.result; if (cur) { out.push([cur.key, cur.value]); cur.continue(); } else res(out); }; c.onerror = () => res(out); }); }
@@ -56,6 +56,35 @@
   function okFile(f, imagesOnly) {
     if (!f || f.size > MAX_FILE || !FILE_TYPES.includes(f.type) || (imagesOnly && f.type === 'application/pdf')) { alert('Fichier refusé : image (png, jpeg, webp, gif) ou PDF de 10 Mo maximum.'); return false; }
     return true;
+  }
+
+
+  /* ---------- Fichiers (photos, factures) : octets bruts, images réduites, lecture dans l'application ---------- */
+  async function toStorable(file, maxSide, q) {
+    let type = file.type, buf = null;
+    if (type.startsWith('image/')) {
+      try {
+        const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
+        const s = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
+        const cv = document.createElement('canvas'); cv.width = Math.max(1, Math.round(bmp.width * s)); cv.height = Math.max(1, Math.round(bmp.height * s));
+        const cx = cv.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0, 0, cv.width, cv.height); cx.drawImage(bmp, 0, 0, cv.width, cv.height); if (bmp.close) bmp.close();
+        const blob = await new Promise((r) => cv.toBlob(r, 'image/jpeg', q));
+        if (blob) { type = 'image/jpeg'; buf = await blob.arrayBuffer(); }
+      } catch (e) { /* format non décodable : on garde l'original */ }
+    }
+    if (!buf) buf = await file.arrayBuffer();
+    return { name: cs(file.name, 120), type, buf };
+  }
+  async function putFile(file, maxSide, q) {
+    try { const rec = await toStorable(file, maxSide, q); const id = uid(); const ok = await DB.put('files', id, rec); return ok ? { id, name: rec.name, type: rec.type } : null; } catch (e) { return null; }
+  }
+  async function getFile(id) { const r = await DB.get('files', id); if (!r) return null; return r instanceof Blob ? r : new Blob([r.buf], { type: r.type }); }
+  async function viewFile(id, name) {
+    const b = await getFile(id);
+    if (!b || !FILE_TYPES.includes(b.type)) { alert('Fichier introuvable sur cet appareil.'); return; }
+    const url = URL.createObjectURL(b); const pdf = b.type === 'application/pdf'; const v = $('#viewer');
+    v.innerHTML = `<div class="vbar"><b>${esc(name)}</b><span class="row"><a class="btn small ghost" href="${url}" download="${esc(name)}">Télécharger</a><button class="btn small" type="button" data-vclose>Fermer</button></span></div>${pdf ? `<iframe src="${url}" title="${esc(name)}"></iframe>` : `<img src="${url}" alt="${esc(name)}">`}`;
+    v.querySelector('[data-vclose]').onclick = () => v.close(); v.onclose = () => URL.revokeObjectURL(url); v.showModal();
   }
 
   /* ---------- Utilitaires ---------- */
@@ -149,7 +178,7 @@
     async (fd) => {
       const o = { name: fd.get('name'), plate: fd.get('plate'), fuel: fd.get('fuel'), body: fd.get('body') || 'citadine', km: Number(fd.get('km')), kmDate: fd.get('kmDate') };
       const ph = $('#ph').files[0];
-      if (ph && okFile(ph, true)) { const pid = uid(); await DB.put('files', pid, ph); if (v.photo) DB.del('files', v.photo); o.photo = pid; }
+      if (ph && okFile(ph, true)) { const sv = await putFile(ph, 1400, 0.85); if (sv) { if (v.photo) DB.del('files', v.photo); o.photo = sv.id; } else alert("Impossible d'enregistrer la photo sur cet appareil (stockage du navigateur indisponible)."); }
       if (v.id) Object.assign(v, o); else { const nv = Object.assign({ id: uid(), tasks: E.TASK_TEMPLATES.map((t) => ({ id: uid(), ...t, baseKm: null, baseDate: null, enabled: true })) }, o); state.vehicles.push(nv); state.currentVehicle = nv.id; }
       await save(); dlg().close(); render();
     });
@@ -186,7 +215,7 @@
       Object.assign(i, { date: fd.get('date'), km: fd.get('km') === '' ? null : Number(fd.get('km')), types: fd.getAll('types'), title: fd.get('title'), shop: fd.get('shop'), status: fd.get('status'), costTtc: Number(fd.get('costTtc') || 0), vat: Number(fd.get('vat')), notes: fd.get('notes') });
       i.todos = Array.from(dlg().querySelectorAll('#todos .todo')).map((row) => ({ id: $('[data-tid]', row)?.dataset.tid || uid(), text: $('input[type=text]', row).value.trim(), done: $('input[type=checkbox]', row).checked })).filter((t) => t.text);
       fd.getAll('close').forEach((c) => { const [iid, tid] = c.split(':'); const src = state.interventions.find((x) => x.id === iid); const t = src && src.todos.find((y) => y.id === tid); if (t) { t.done = true; t.doneOn = i.date; } });
-      for (const f of newFiles) { const id = uid(); await DB.put('files', id, f); i.files.push({ id, name: f.name, type: f.type }); }
+      for (const f of newFiles) { const sv = await putFile(f, 2000, 0.85); if (sv) i.files.push(sv); else alert("Impossible d'enregistrer « " + f.name + " » (stockage du navigateur indisponible)."); }
       if (i.status !== 'planned' && i.km != null && i.km > v.km) { v.km = i.km; v.kmDate = i.date; }
       if (isNew) state.interventions.push(i);
       await save(); dlg().close(); render();
@@ -217,7 +246,7 @@
   /* ---------- Actions ---------- */
   async function exportBackup() {
     const files = await DB.all('files'); const out = [];
-    for (const [id, blob] of files) { const data = await new Promise((r) => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(blob); }); out.push({ id, name: blob.name, type: blob.type, data }); }
+    for (const [id, rec] of files) { const blob = rec instanceof Blob ? rec : new Blob([rec.buf], { type: rec.type }); const data = await new Promise((r) => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(blob); }); out.push({ id, name: rec.name || 'fichier', type: blob.type, data }); }
     download(new Blob([JSON.stringify({ app: 'odometre', version: 1, vehicles: state.vehicles, interventions: state.interventions, settings: state.settings, files: out })], { type: 'application/json' }), `odometre-sauvegarde-${E.iso(E.today())}.json`);
   }
   async function importBackup(file) {
@@ -226,7 +255,7 @@
       const j = sanitizeBackup(JSON.parse(await file.text()));
       if (!confirm('Remplacer les données actuelles par cette sauvegarde ?')) return;
       state.vehicles = j.vehicles; state.interventions = j.interventions; state.settings = Object.assign(state.settings, j.settings);
-      for (const f of j.files) { const blob = await (await fetch(f.data)).blob(); if (blob.size <= MAX_FILE) await DB.put('files', f.id, new File([blob], cs(f.name, 120), { type: f.type })); }
+      for (const f of j.files) { const blob = await (await fetch(f.data)).blob(); if (blob.size <= MAX_FILE) await DB.put('files', f.id, { name: cs(f.name, 120), type: f.type, buf: await blob.arrayBuffer() }); }
       state.currentVehicle = null; await save(); render();
     } catch (e) { alert('Fichier de sauvegarde illisible.'); }
   }
@@ -255,7 +284,7 @@
     else if (a === 'notify') enableNotify(); else if (a === 'export') exportBackup();
     else if (a === 'reset') { if (confirm('Effacer tout le carnet de cet appareil ?') && confirm('Dernière confirmation : cette action est définitive.')) { state.vehicles = []; state.interventions = []; for (const [id] of await DB.all('files')) await DB.del('files', id); state.currentVehicle = null; await save(); render(); } }
     else if (a === 'demoData') { seedDemo(); await save(); render(); }
-    else if (a === 'openFile') { e.preventDefault(); const b = await DB.get('files', el.dataset.f); if (b && FILE_TYPES.includes(b.type)) window.open(URL.createObjectURL(new Blob([b], { type: b.type })), '_blank', 'noopener'); }
+    else if (a === 'openFile') { e.preventDefault(); viewFile(el.dataset.f, el.textContent.trim() || 'fichier'); }
   });
   document.addEventListener('change', async (e) => {
     const el = e.target;
@@ -295,6 +324,6 @@
     if (!DEMO && 'serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
     boot2();
   }
-  window.Odo = { state, E, DEMO, esc, eur, num, dFr, monthFr, monthShort, typeLabel, vInts, humanDue, picker, PILL, vehicle, getFile: (id) => DB.get('files', id) };
+  window.Odo = { state, E, DEMO, esc, eur, num, dFr, monthFr, monthShort, typeLabel, vInts, humanDue, picker, PILL, vehicle, getFile };
   boot();
 })();
